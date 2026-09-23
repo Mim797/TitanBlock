@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.ActionMode
@@ -17,8 +18,8 @@ import java.util.concurrent.TimeUnit
 
 class BlockOverlayActivity : Activity() {
 
-    // 202 Characters of painful, formal, uncompromising text
     private val requiredTaxText = "I acknowledge that my attention is my most valuable finite resource, yet I am deliberately choosing to surrender my discipline, break my promise to myself, and consume meaningless digital stimulation."
+    private var countDownTimer: CountDownTimer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,30 +31,60 @@ class BlockOverlayActivity : Activity() {
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 48, 32, 32)
+            setPadding(32, 40, 32, 32)
             gravity = Gravity.CENTER_HORIZONTAL
         }
         scroll.addView(layout)
 
         val title = TextView(this).apply {
             text = "🚫 TITAN LOCKDOWN ACTIVE"
-            textSize = 20f
+            textSize = 18f
             setTextColor(Color.parseColor("#FF5252"))
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
         }
         layout.addView(title)
 
+        // LIVE REAL-TIME TICKING DIGITAL CLOCK (HH:MM:SS)
+        val timerDisplay = TextView(this).apply {
+            text = "--:--:--"
+            textSize = 42f
+            setTextColor(Color.parseColor("#00E676"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, 16, 0, 8)
+        }
+        layout.addView(timerDisplay)
+
         val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE)
         val remainingMillis = prefs.getLong("lock_end_time", 0L) - System.currentTimeMillis()
-        val minutesLeft = TimeUnit.MILLISECONDS.toMinutes(remainingMillis).coerceAtLeast(1)
+
+        if (remainingMillis <= 0) {
+            finish()
+            return
+        }
+
+        // Real countdown timer ticking every 1 second
+        countDownTimer = object : CountDownTimer(remainingMillis, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                val hours = TimeUnit.MILLISECONDS.toHours(millisUntilFinished)
+                val minutes = TimeUnit.MILLISECONDS.toMinutes(millisUntilFinished) % 60
+                val seconds = TimeUnit.MILLISECONDS.toSeconds(millisUntilFinished) % 60
+                timerDisplay.text = String.format("%02d:%02d:%02d", hours, minutes, seconds)
+            }
+
+            override fun onFinish() {
+                timerDisplay.text = "00:00:00"
+                finish() // Automatically dismiss block screen when time expires
+            }
+        }.start()
 
         val subtitle = TextView(this).apply {
-            text = "Locked for $minutesLeft more minutes.\nClose this app and return to reality."
-            textSize = 13f
+            text = "Time remaining until unlocked.\nClose this app and return to your work."
+            textSize = 12f
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 24)
+            setPadding(0, 0, 0, 20)
         }
         layout.addView(subtitle)
 
@@ -74,17 +105,17 @@ class BlockOverlayActivity : Activity() {
         layout.addView(btnHome)
 
         val spacer = TextView(this).apply {
-            text = "\n— THE DOPAMINE TAX —\n"
+            text = "\n— OR PAY THE DOPAMINE TAX —\n"
             setTextColor(Color.DKGRAY)
             gravity = Gravity.CENTER
         }
         layout.addView(spacer)
 
         val taxInstructions = TextView(this).apply {
-            text = "Type this exact passage manually (Copy-Paste is completely disabled). Every comma, space, and letter must match:\n\n\"$requiredTaxText\""
-            textSize = 12f
+            text = "Type this exact passage manually (Copy-Paste Disabled):\n\n\"$requiredTaxText\""
+            textSize = 11f
             setTextColor(Color.parseColor("#9E9E9E"))
-            setPadding(0, 0, 0, 12)
+            setPadding(0, 0, 0, 10)
         }
         layout.addView(taxInstructions)
 
@@ -101,10 +132,9 @@ class BlockOverlayActivity : Activity() {
             setHintTextColor(Color.DKGRAY)
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.parseColor("#141822"))
-            setPadding(20, 20, 20, 20)
+            setPadding(18, 18, 18, 18)
             textSize = 13f
 
-            // DISABLE COPY-PASTE TO PREVENT SHORTCUTS
             customSelectionActionModeCallback = object : ActionMode.Callback {
                 override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
                 override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
@@ -120,7 +150,6 @@ class BlockOverlayActivity : Activity() {
             setBackgroundColor(Color.parseColor("#1F2430"))
             setTextColor(Color.DKGRAY)
             setOnClickListener {
-                // Grant 5 minutes
                 prefs.edit().putLong("temp_pass_time", System.currentTimeMillis() + (5 * 60 * 1000)).apply()
                 Toast.makeText(this@BlockOverlayActivity, "Unlocked for 5 minutes only!", Toast.LENGTH_LONG).show()
                 finish()
@@ -128,13 +157,10 @@ class BlockOverlayActivity : Activity() {
         }
         layout.addView(btnUnlock)
 
-        // Text listener with smart normalization (handles phone keyboard smart quotes/spaces)
         input.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) {
                 val typed = normalize(s?.toString() ?: "")
                 val target = normalize(requiredTaxText)
-
-                // Match exact matching length
                 val matchedCount = typed.zip(target).takeWhile { (a, b) -> a == b }.count()
 
                 if (typed == target) {
@@ -165,6 +191,11 @@ class BlockOverlayActivity : Activity() {
             .replace("“", "\"")
             .replace("”", "\"")
             .replace("\\s+".toRegex(), " ")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        countDownTimer?.cancel()
     }
 
     override fun onBackPressed() {
