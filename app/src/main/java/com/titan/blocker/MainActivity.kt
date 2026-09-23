@@ -9,6 +9,7 @@ import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.provider.Settings
 import android.util.LruCache
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -28,22 +29,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
-// Zero-overhead data model (Text only)
 data class AppItem(val name: String, val packageName: String)
 
-// Static High-Speed Icon Cache: Lives across screens and avoids re-decoding
 object FastIconCache {
     private val memoryCache = LruCache<String, ImageBitmap>(80)
     fun get(pkg: String): ImageBitmap? = memoryCache.get(pkg)
@@ -69,7 +70,18 @@ class MainActivity : ComponentActivity() {
                 var selectedMinutes by remember { mutableFloatStateOf(30f) }
                 var showFullListDialog by remember { mutableStateOf(false) }
 
-                // Selected apps list (Loads in 2ms from SharedPreferences)
+                // LIVE TICKER: Updates every second
+                var currentClockTime by remember { mutableStateOf(System.currentTimeMillis()) }
+                val isCurrentlyLocked = currentClockTime < lockEndTime
+
+                LaunchedEffect(lockEndTime) {
+                    while (currentClockTime < lockEndTime) {
+                        delay(1000L)
+                        currentClockTime = System.currentTimeMillis()
+                    }
+                }
+
+                // Selected apps
                 var selectedAppPackages by remember {
                     val saved = prefs.getString("blocked_apps", null)
                     val list: List<String> = if (saved != null) {
@@ -78,11 +90,9 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf(list.toSet())
                 }
 
-                // Installed apps list (LAZY: Stays empty until user taps "MANAGE ALL APPS")
                 var installedApps by remember { mutableStateOf<List<AppItem>>(emptyList()) }
                 var isScanningApps by remember { mutableStateOf(false) }
 
-                // Trigger scan ONLY when the dialog is actually opened
                 LaunchedEffect(showFullListDialog) {
                     if (showFullListDialog && installedApps.isEmpty()) {
                         isScanningApps = true
@@ -94,7 +104,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 var protectSettings by remember { mutableStateOf(prefs.getBoolean("protect_settings", true)) }
-                val isCurrentlyLocked = System.currentTimeMillis() < lockEndTime
 
                 fun persistSelection(updated: Set<String>) {
                     selectedAppPackages = updated
@@ -129,7 +138,7 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Anti-Settings Shield Toggle
+                    // Anti-Settings Shield
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -151,7 +160,7 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Pinned Apps Header
+                    // Blocklist Header (MANAGE BUTTON REMAINS ENABLED DURING LOCKDOWN)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -159,11 +168,11 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Text("YOUR ACTIVE BLOCKLIST", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
                         Text(
-                            text = "⚙️ MANAGE ALL APPS",
+                            text = if (isCurrentlyLocked) "+ ADD MORE APPS" else "⚙️ MANAGE ALL APPS",
                             color = MaterialTheme.colorScheme.primary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable(enabled = !isCurrentlyLocked) {
+                            modifier = Modifier.clickable {
                                 showFullListDialog = true
                             }
                         )
@@ -171,7 +180,6 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // MAIN SCREEN: Shows ONLY the pinned apps (Silky smooth 60fps)
                     if (selectedAppPackages.isEmpty()) {
                         Box(
                             modifier = Modifier
@@ -184,9 +192,7 @@ class MainActivity : ComponentActivity() {
                             Text("+ Tap to select apps to block", color = Color.Gray, fontSize = 13.sp)
                         }
                     } else {
-                        val pinnedList = remember(selectedAppPackages, installedApps) {
-                            selectedAppPackages.toList()
-                        }
+                        val pinnedList = remember(selectedAppPackages) { selectedAppPackages.toList() }
 
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -195,7 +201,7 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxWidth()
                         ) {
                             items(pinnedList, key = { it }) { pkg ->
-                                val appName: String = resolveAppNameQuick(context, pkg)
+                                val appName = resolveAppNameQuick(context, pkg)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -213,15 +219,20 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    Text(
-                                        text = "REMOVE",
-                                        color = Color(0xFFFF5252),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.clickable(enabled = !isCurrentlyLocked) {
-                                            persistSelection(selectedAppPackages - pkg)
-                                        }
-                                    )
+                                    // During lockdown, unchecking/removing is prevented
+                                    if (isCurrentlyLocked) {
+                                        Text("🔒 LOCKED", color = Color.DarkGray, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                                    } else {
+                                        Text(
+                                            text = "REMOVE",
+                                            color = Color(0xFFFF5252),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable {
+                                                persistSelection(selectedAppPackages - pkg)
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -229,10 +240,14 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Timer Panel
+                    // TIMER DASHBOARD (LIVE SECOND-BY-SECOND TICKING COUNTDOWN)
                     if (isCurrentlyLocked) {
-                        val minutesRemaining = TimeUnit.MILLISECONDS.toMinutes(lockEndTime - System.currentTimeMillis()).coerceAtLeast(1)
-                        val finishDate = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(lockEndTime))
+                        val remainingMillis = (lockEndTime - currentClockTime).coerceAtLeast(0L)
+                        val hours = TimeUnit.MILLISECONDS.toHours(remainingMillis)
+                        val minutes = TimeUnit.MILLISECONDS.toMinutes(remainingMillis) % 60
+                        val seconds = TimeUnit.MILLISECONDS.toSeconds(remainingMillis) % 60
+                        val timeFormatted = String.format("%02d:%02d:%02d", hours, minutes, seconds)
+                        val finishDate = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(lockEndTime))
 
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF261214)),
@@ -243,8 +258,16 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(14.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("LOCKDOWN ACTIVE", color = Color(0xFFFF5252), fontWeight = FontWeight.Black, fontSize = 16.sp)
-                                Text("$minutesRemaining minutes left (Unlocks at $finishDate)", color = Color.LightGray, fontSize = 12.sp)
+                                Text("LOCKDOWN ACTIVE", color = Color(0xFFFF5252), fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = timeFormatted,
+                                    color = Color(0xFF00E676),
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text("Unlocks at $finishDate", color = Color.LightGray, fontSize = 11.sp)
                             }
                         }
                     } else {
@@ -337,7 +360,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // DIALOG: Opens only when requested
+                // DIALOG: ALLOWS CHECKING NEW APPS DURING LOCKDOWN (UNCHECKING IS PREVENTED)
                 if (showFullListDialog) {
                     var query by remember { mutableStateOf("") }
                     val filtered = remember(query, installedApps) {
@@ -356,7 +379,14 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         containerColor = Color(0xFF12151D),
-                        title = { Text("All Installed Apps", fontWeight = FontWeight.Bold, color = Color.White) },
+                        title = {
+                            Column {
+                                Text("Manage Blocked Apps", fontWeight = FontWeight.Bold, color = Color.White)
+                                if (isCurrentlyLocked) {
+                                    Text("🔒 Session Active: You can add new apps, but cannot unblock.", fontSize = 11.sp, color = Color(0xFFFF9100))
+                                }
+                            }
+                        },
                         text = {
                             Column(modifier = Modifier.fillMaxWidth().height(400.dp)) {
                                 OutlinedTextField(
@@ -383,8 +413,16 @@ class MainActivity : ComponentActivity() {
                                                     .clip(RoundedCornerShape(8.dp))
                                                     .background(if (isChecked) Color(0xFF16241C) else Color(0xFF181C26))
                                                 .clickable {
-                                                    val updated = if (isChecked) selectedAppPackages - app.packageName else selectedAppPackages + app.packageName
-                                                    persistSelection(updated)
+                                                    if (isChecked) {
+                                                        if (isCurrentlyLocked) {
+                                                            Toast.makeText(context, "🛡️ Cannot unblock apps while lock is active!", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            persistSelection(selectedAppPackages - app.packageName)
+                                                        }
+                                                    } else {
+                                                        // Adding is ALWAYS allowed!
+                                                        persistSelection(selectedAppPackages + app.packageName)
+                                                    }
                                                 }
                                                 .padding(8.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -398,9 +436,13 @@ class MainActivity : ComponentActivity() {
 
                                                 Checkbox(
                                                     checked = isChecked,
-                                                    onCheckedChange = {
-                                                        val updated = if (it) selectedAppPackages + app.packageName else selectedAppPackages - app.packageName
-                                                        persistSelection(updated)
+                                                    onCheckedChange = { checkState ->
+                                                        if (!checkState && isCurrentlyLocked) {
+                                                            Toast.makeText(context, "🛡️ Cannot unblock apps during session!", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            val updated = if (checkState) selectedAppPackages + app.packageName else selectedAppPackages - app.packageName
+                                                            persistSelection(updated)
+                                                        }
                                                     },
                                                     colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                                                 )
@@ -416,7 +458,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // CACHED ICON COMPOSABLE: Checks Memory Cache first (0ms), otherwise decodes tiny 48x48 icon
     @Composable
     private fun CachedAppIcon(packageName: String, appName: String) {
         val context = LocalContext.current
@@ -433,7 +474,7 @@ class MainActivity : ComponentActivity() {
                             bitmap = decoded
                         }
                     } catch (t: Throwable) {
-                        // ignore and use fallback letter
+                        // ignore and use letter fallback
                     }
                 }
             }
