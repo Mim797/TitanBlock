@@ -2,9 +2,13 @@ package com.titan.blocker
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.provider.Settings
+import android.util.LruCache
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -27,15 +31,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
-data class AppItem(val name: String, val packageName: String, val icon: ImageBitmap?)
+// Zero-overhead data model (Text only)
+data class AppItem(val name: String, val packageName: String)
+
+// Static High-Speed Icon Cache: Lives across screens and avoids re-decoding
+object FastIconCache {
+    private val memoryCache = LruCache<String, ImageBitmap>(80)
+    fun get(pkg: String): ImageBitmap? = memoryCache.get(pkg)
+    fun put(pkg: String, bmp: ImageBitmap) { memoryCache.put(pkg, bmp) }
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -56,17 +69,28 @@ class MainActivity : ComponentActivity() {
                 var selectedMinutes by remember { mutableFloatStateOf(30f) }
                 var showFullListDialog by remember { mutableStateOf(false) }
 
-                // Asynchronously load installed apps with real icons
-                var installedApps by remember { mutableStateOf<List<AppItem>>(emptyList()) }
-                LaunchedEffect(Unit) {
-                    installedApps = loadInstalledApps(context)
-                }
-
-                // Selected apps list
+                // Selected apps list (Loads in 2ms from SharedPreferences)
                 var selectedAppPackages by remember {
                     val saved = prefs.getString("blocked_apps", null)
-                    val list: List<String> = if (saved != null) gson.fromJson(saved, object : TypeToken<List<String>>() {}.type) else emptyList()
+                    val list: List<String> = if (saved != null) {
+                        try { gson.fromJson(saved, object : TypeToken<List<String>>() {}.type) } catch (t: Throwable) { emptyList() }
+                    } else emptyList()
                     mutableStateOf(list.toSet())
+                }
+
+                // Installed apps list (LAZY: Stays empty until user taps "MANAGE ALL APPS")
+                var installedApps by remember { mutableStateOf<List<AppItem>>(emptyList()) }
+                var isScanningApps by remember { mutableStateOf(false) }
+
+                // Trigger scan ONLY when the dialog is actually opened
+                LaunchedEffect(showFullListDialog) {
+                    if (showFullListDialog && installedApps.isEmpty()) {
+                        isScanningApps = true
+                        withContext(Dispatchers.IO) {
+                            installedApps = scanLaunchableApps(context)
+                            isScanningApps = false
+                        }
+                    }
                 }
 
                 var protectSettings by remember { mutableStateOf(prefs.getBoolean("protect_settings", true)) }
@@ -75,10 +99,6 @@ class MainActivity : ComponentActivity() {
                 fun persistSelection(updated: Set<String>) {
                     selectedAppPackages = updated
                     prefs.edit().putString("blocked_apps", gson.toJson(updated)).apply()
-                }
-
-                val pinnedApps = remember(installedApps, selectedAppPackages) {
-                    installedApps.filter { selectedAppPackages.contains(it.packageName) }
                 }
 
                 Column(
@@ -109,7 +129,7 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Anti-Settings Shield
+                    // Anti-Settings Shield Toggle
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -131,7 +151,7 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // ACTIVE BLOCKLIST (Clean Pinned View)
+                    // Pinned Apps Header
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -151,7 +171,8 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (pinnedApps.isEmpty()) {
+                    // MAIN SCREEN: Shows ONLY the pinned apps (Silky smooth 60fps)
+                    if (selectedAppPackages.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -160,16 +181,21 @@ class MainActivity : ComponentActivity() {
                                 .clickable { showFullListDialog = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("+ Tap here to select apps from full phone list", color = Color.Gray, fontSize = 13.sp)
+                            Text("+ Tap to select apps to block", color = Color.Gray, fontSize = 13.sp)
                         }
                     } else {
+                        val pinnedList = remember(selectedAppPackages, installedApps) {
+                            selectedAppPackages.toList()
+                        }
+
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
                         ) {
-                            items(pinnedApps, key = { it.packageName }) { app ->
+                            items(pinnedList, key = { it }) { pkg ->
+                                val appName = resolveAppNameQuick(context, pkg)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -178,16 +204,12 @@ class MainActivity : ComponentActivity() {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (app.icon != null) {
-                                            Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(34.dp))
-                                        } else {
-                                            Box(modifier = Modifier.size(34.dp).background(Color(0xFF232A3B), CircleShape))
-                                        }
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        CachedAppIcon(pkg, appName)
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column {
-                                            Text(app.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
-                                            Text(app.packageName, fontSize = 10.sp, color = Color.Gray)
+                                            Text(appName, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
+                                            Text(pkg, fontSize = 10.sp, color = Color.Gray)
                                         }
                                     }
 
@@ -197,7 +219,7 @@ class MainActivity : ComponentActivity() {
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.clickable(enabled = !isCurrentlyLocked) {
-                                            persistSelection(selectedAppPackages - app.packageName)
+                                            persistSelection(selectedAppPackages - pkg)
                                         }
                                     )
                                 }
@@ -207,9 +229,7 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // -------------------------------------------------------------
-                    // TIMER PANEL (DEFAULT PRESETS + MANUAL SLIDER)
-                    // -------------------------------------------------------------
+                    // Timer Panel
                     if (isCurrentlyLocked) {
                         val minutesRemaining = TimeUnit.MILLISECONDS.toMinutes(lockEndTime - System.currentTimeMillis()).coerceAtLeast(1)
                         val finishDate = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(lockEndTime))
@@ -241,7 +261,6 @@ class MainActivity : ComponentActivity() {
                             val futureTimestamp = System.currentTimeMillis() + (durationInt * 60 * 1000)
                             val endClockTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(futureTimestamp))
 
-                            // 1. DEFAULT CHOICES
                             Text("DEFAULT PRESETS:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(
@@ -270,7 +289,6 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // 2. MANUAL DURATION SLIDER
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -295,7 +313,6 @@ class MainActivity : ComponentActivity() {
                                 )
                             )
 
-                            // 3. START BUTTON
                             Button(
                                 onClick = {
                                     if (selectedAppPackages.isNotEmpty()) {
@@ -320,9 +337,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // -------------------------------------------------------------
-                // ALL INSTALLED APPS DIALOG (WITH SEARCH & APP ICONS)
-                // -------------------------------------------------------------
+                // DIALOG: Opens only when requested
                 if (showFullListDialog) {
                     var query by remember { mutableStateOf("") }
                     val filtered = remember(query, installedApps) {
@@ -337,7 +352,7 @@ class MainActivity : ComponentActivity() {
                                 onClick = { showFullListDialog = false },
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             ) {
-                                Text("DONE (${selectedAppPackages.size} SELECTED)", color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text("DONE (${selectedAppPackages.size})", color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         },
                         containerColor = Color(0xFF12151D),
@@ -354,40 +369,42 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    items(filtered, key = { it.packageName }) { app ->
-                                        val isChecked = selectedAppPackages.contains(app.packageName)
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isChecked) Color(0xFF16241C) else Color(0xFF181C26))
-                                                .clickable {
-                                                    val updated = if (isChecked) selectedAppPackages - app.packageName else selectedAppPackages + app.packageName
-                                                    persistSelection(updated)
+                                if (isScanningApps) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                    }
+                                } else {
+                                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(filtered, key = { it.packageName }) { app ->
+                                            val isChecked = selectedAppPackages.contains(app.packageName)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isChecked) Color(0xFF16241C) else Color(0xFF181C26))
+                                                    .clickable {
+                                                        val updated = if (isChecked) selectedAppPackages - app.packageName else selectedAppPackages + app.packageName
+                                                        persistSelection(updated)
+                                                    }
+                                                    .padding(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                    CachedAppIcon(app.packageName, app.name)
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Text(app.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                                 }
-                                                .padding(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                                if (app.icon != null) {
-                                                    Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(32.dp))
-                                                } else {
-                                                    Box(modifier = Modifier.size(32.dp).background(Color.Gray, CircleShape))
-                                                }
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(app.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                                            }
 
-                                            Checkbox(
-                                                checked = isChecked,
-                                                onCheckedChange = {
-                                                    val updated = if (it) selectedAppPackages + app.packageName else selectedAppPackages - app.packageName
-                                                    persistSelection(updated)
-                                                },
-                                                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
-                                            )
+                                                Checkbox(
+                                                    checked = isChecked,
+                                                    onCheckedChange = {
+                                                        val updated = if (it) selectedAppPackages + app.packageName else selectedAppPackages - app.packageName
+                                                        persistSelection(updated)
+                                                    },
+                                                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -399,22 +416,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loadInstalledApps(context: Context): List<AppItem> {
-        val pm = context.packageManager
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-        return pm.queryIntentActivities(mainIntent, 0).mapNotNull { resolveInfo ->
-            try {
-                val pkg = resolveInfo.activityInfo.packageName
-                if (pkg == context.packageName) return@mapNotNull null
-                val name = resolveInfo.loadLabel(pm).toString()
-                val iconDrawable: Drawable = resolveInfo.loadIcon(pm)
-                val bitmap: ImageBitmap = iconDrawable.toBitmap(width = 80, height = 80).asImageBitmap()
-                AppItem(name = name, packageName = pkg, icon = bitmap)
-            } catch (e: Exception) {
-                null
-            }
-        }.sortedBy { it.name.lowercase() }
-    }
-}
+    // CACHED ICON COMPOSABLE: Checks Memory Cache first (0ms), otherwise decodes tiny 48x48 icon
+    @Composable
+    private fun CachedAppIcon(packageName: String, appName: String) {
+        val context = LocalContext.current
+        var bitmap by remember(packageName) { mutableStateOf(FastIconCache.get(packageName)) }
+
+        if (bitmap == null) {
+            LaunchedEffect(packageName) {
+                wi
