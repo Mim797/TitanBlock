@@ -17,21 +17,27 @@ import java.util.concurrent.TimeUnit
 
 class BlockOverlayActivity : Activity() {
 
-    private val requiredTaxText = "I am consciously choosing to waste my time on digital distractions."
+    // 202 Characters of painful, formal, uncompromising text
+    private val requiredTaxText = "I acknowledge that my attention is my most valuable finite resource, yet I am deliberately choosing to surrender my discipline, break my promise to myself, and consume meaningless digital stimulation."
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val scroll = ScrollView(this).apply {
             setBackgroundColor(Color.parseColor("#090A0C"))
-            setPadding(40, 60, 40, 40)
-            gravity = Gravity.CENTER_HORIZONTAL
+            isFillViewport = true
         }
 
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 48, 32, 32)
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        scroll.addView(layout)
+
         val title = TextView(this).apply {
-            text = "🚫 TITAN LOCK ACTIVE"
-            textSize = 22f
+            text = "🚫 TITAN LOCKDOWN ACTIVE"
+            textSize = 20f
             setTextColor(Color.parseColor("#FF5252"))
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
@@ -43,18 +49,19 @@ class BlockOverlayActivity : Activity() {
         val minutesLeft = TimeUnit.MILLISECONDS.toMinutes(remainingMillis).coerceAtLeast(1)
 
         val subtitle = TextView(this).apply {
-            text = "Locked for $minutesLeft more minutes.\nStay focused on your real goals."
-            textSize = 14f
+            text = "Locked for $minutesLeft more minutes.\nClose this app and return to reality."
+            textSize = 13f
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
-            setPadding(0, 20, 0, 30)
+            setPadding(0, 16, 0, 24)
         }
         layout.addView(subtitle)
 
         val btnHome = Button(this).apply {
-            text = "RETURN TO WORK (HOME)"
+            text = "RETURN TO FOCUS (HOME)"
             setBackgroundColor(Color.parseColor("#00E676"))
             setTextColor(Color.BLACK)
+            setTypeface(null, Typeface.BOLD)
             setOnClickListener {
                 val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                     addCategory(Intent.CATEGORY_HOME)
@@ -67,28 +74,37 @@ class BlockOverlayActivity : Activity() {
         layout.addView(btnHome)
 
         val spacer = TextView(this).apply {
-            text = "\n— OR PAY THE DOPAMINE TAX —\n"
+            text = "\n— THE DOPAMINE TAX —\n"
             setTextColor(Color.DKGRAY)
             gravity = Gravity.CENTER
         }
         layout.addView(spacer)
 
         val taxInstructions = TextView(this).apply {
-            text = "Type this exact sentence by hand (Copy-Paste Disabled) to earn a strict 5-minute unlock:\n\n\"$requiredTaxText\""
+            text = "Type this exact passage manually (Copy-Paste is completely disabled). Every comma, space, and letter must match:\n\n\"$requiredTaxText\""
             textSize = 12f
-            setTextColor(Color.GRAY)
-            setPadding(0, 0, 0, 16)
+            setTextColor(Color.parseColor("#9E9E9E"))
+            setPadding(0, 0, 0, 12)
         }
         layout.addView(taxInstructions)
 
+        val progressText = TextView(this).apply {
+            text = "Progress: 0 / ${requiredTaxText.length} characters"
+            textSize = 12f
+            setTextColor(Color.parseColor("#FF9100"))
+            setPadding(0, 0, 0, 8)
+        }
+        layout.addView(progressText)
+
         val input = EditText(this).apply {
-            hint = "Type sentence here exactly..."
+            hint = "Begin typing here..."
             setHintTextColor(Color.DKGRAY)
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#151922"))
+            setBackgroundColor(Color.parseColor("#141822"))
             setPadding(20, 20, 20, 20)
+            textSize = 13f
 
-            // DISABLE COPY-PASTE TO PREVENT CHEATING
+            // DISABLE COPY-PASTE TO PREVENT SHORTCUTS
             customSelectionActionModeCallback = object : ActionMode.Callback {
                 override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
                 override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
@@ -99,11 +115,12 @@ class BlockOverlayActivity : Activity() {
         layout.addView(input)
 
         val btnUnlock = Button(this).apply {
-            text = "CLAIM 5-MINUTE PASS"
+            text = "CLAIM 5-MINUTE EMERGENCY PASS"
             isEnabled = false
-            setBackgroundColor(Color.parseColor("#2A3142"))
-            setTextColor(Color.GRAY)
+            setBackgroundColor(Color.parseColor("#1F2430"))
+            setTextColor(Color.DKGRAY)
             setOnClickListener {
+                // Grant 5 minutes
                 prefs.edit().putLong("temp_pass_time", System.currentTimeMillis() + (5 * 60 * 1000)).apply()
                 Toast.makeText(this@BlockOverlayActivity, "Unlocked for 5 minutes only!", Toast.LENGTH_LONG).show()
                 finish()
@@ -111,23 +128,43 @@ class BlockOverlayActivity : Activity() {
         }
         layout.addView(btnUnlock)
 
+        // Text listener with smart normalization (handles phone keyboard smart quotes/spaces)
         input.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) {
-                if (s?.toString()?.trim() == requiredTaxText) {
+                val typed = normalize(s?.toString() ?: "")
+                val target = normalize(requiredTaxText)
+
+                // Match exact matching length
+                val matchedCount = typed.zip(target).takeWhile { (a, b) -> a == b }.count()
+
+                if (typed == target) {
                     btnUnlock.isEnabled = true
                     btnUnlock.setBackgroundColor(Color.parseColor("#FF5252"))
                     btnUnlock.setTextColor(Color.WHITE)
+                    progressText.text = "PASSED (100% MATCH). You may claim 5 min."
+                    progressText.setTextColor(Color.parseColor("#00E676"))
                 } else {
                     btnUnlock.isEnabled = false
-                    btnUnlock.setBackgroundColor(Color.parseColor("#2A3142"))
-                    btnUnlock.setTextColor(Color.GRAY)
+                    btnUnlock.setBackgroundColor(Color.parseColor("#1F2430"))
+                    btnUnlock.setTextColor(Color.DKGRAY)
+                    progressText.text = "Progress: $matchedCount / ${target.length} characters correct"
+                    progressText.setTextColor(if (typed.length > matchedCount) Color.parseColor("#FF5252") else Color.parseColor("#FF9100"))
                 }
             }
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
         })
 
-        setContentView(layout)
+        setContentView(scroll)
+    }
+
+    private fun normalize(str: String): String {
+        return str.trim()
+            .replace("’", "'")
+            .replace("‘", "'")
+            .replace("“", "\"")
+            .replace("”", "\"")
+            .replace("\\s+".toRegex(), " ")
     }
 
     override fun onBackPressed() {
