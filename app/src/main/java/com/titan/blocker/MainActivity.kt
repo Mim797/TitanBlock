@@ -2,11 +2,12 @@ package com.titan.blocker
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,10 +21,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.text.SimpleDateFormat
@@ -31,7 +35,7 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
-data class AppItem(val name: String, val packageName: String)
+data class AppItem(val name: String, val packageName: String, val icon: ImageBitmap?)
 
 class MainActivity : ComponentActivity() {
 
@@ -50,14 +54,15 @@ class MainActivity : ComponentActivity() {
                 val context = LocalContext.current
                 var lockEndTime by remember { mutableStateOf(prefs.getLong("lock_end_time", 0L)) }
                 var selectedMinutes by remember { mutableFloatStateOf(30f) }
-                var searchQuery by remember { mutableStateOf("") }
+                var showFullListDialog by remember { mutableStateOf(false) }
 
-                // Load all launchable installed apps on the phone
-                val installedApps by remember {
-                    mutableStateOf(loadInstalledApps(context))
+                // Asynchronously load installed apps with real icons
+                var installedApps by remember { mutableStateOf<List<AppItem>>(emptyList()) }
+                LaunchedEffect(Unit) {
+                    installedApps = loadInstalledApps(context)
                 }
 
-                // Selected apps stored in SharedPreferences
+                // Selected apps list
                 var selectedAppPackages by remember {
                     val saved = prefs.getString("blocked_apps", null)
                     val list: List<String> = if (saved != null) gson.fromJson(saved, object : TypeToken<List<String>>() {}.type) else emptyList()
@@ -72,9 +77,8 @@ class MainActivity : ComponentActivity() {
                     prefs.edit().putString("blocked_apps", gson.toJson(updated)).apply()
                 }
 
-                val filteredApps = remember(searchQuery, installedApps) {
-                    if (searchQuery.isBlank()) installedApps
-                    else installedApps.filter { it.name.contains(searchQuery, ignoreCase = true) || it.packageName.contains(searchQuery, ignoreCase = true) }
+                val pinnedApps = remember(installedApps, selectedAppPackages) {
+                    installedApps.filter { selectedAppPackages.contains(it.packageName) }
                 }
 
                 Column(
@@ -91,11 +95,11 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Column {
                             Text("TITAN BLOCKER", fontWeight = FontWeight.Black, fontSize = 22.sp, color = Color.White)
-                            Text("${selectedAppPackages.size} apps flagged for lockdown", fontSize = 11.sp, color = Color.Gray)
+                            Text("${selectedAppPackages.size} apps targeted for lock", fontSize = 11.sp, color = Color.Gray)
                         }
                         Button(
                             onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F2430)),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E2330)),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                         ) {
@@ -125,74 +129,78 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Search Bar
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search installed apps...", fontSize = 13.sp, color = Color.DarkGray) },
-                        singleLine = true,
+                    // ACTIVE BLOCKLIST (Clean Pinned View)
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = Color(0xFF222836)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("YOUR ACTIVE BLOCKLIST", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
+                        Text(
+                            text = "⚙️ MANAGE ALL APPS",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(enabled = !isCurrentlyLocked) {
+                                showFullListDialog = true
+                            }
                         )
-                    )
+                    }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Scrollable Installed Apps
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    ) {
-                        items(filteredApps, key = { it.packageName }) { app ->
-                            val isSelected = selectedAppPackages.contains(app.packageName)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(if (isSelected) Color(0xFF152A1E) else Color(0xFF141720), RoundedCornerShape(8.dp))
-                                    .clickable(enabled = !isCurrentlyLocked) {
-                                        val updated = if (isSelected) selectedAppPackages - app.packageName else selectedAppPackages + app.packageName
-                                        persistSelection(updated)
+                    if (pinnedApps.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .background(Color(0xFF141720), RoundedCornerShape(12.dp))
+                                .clickable { showFullListDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("+ Tap here to select apps from full phone list", color = Color.Gray, fontSize = 13.sp)
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            items(pinnedApps, key = { it.packageName }) { app ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF16241C), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (app.icon != null) {
+                                            Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(34.dp))
+                                        } else {
+                                            Box(modifier = Modifier.size(34.dp).background(Color(0xFF232A3B), CircleShape))
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(app.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
+                                            Text(app.packageName, fontSize = 10.sp, color = Color.Gray)
+                                        }
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .background(if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF232A3B), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = app.name.take(1).uppercase(),
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) Color.Black else Color.White,
-                                            fontSize = 14.sp
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(app.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
-                                        Text(app.packageName, fontSize = 10.sp, color = Color.Gray)
-                                    }
-                                }
 
-                                Checkbox(
-                                    checked = isSelected,
-                                    enabled = !isCurrentlyLocked,
-                                    onCheckedChange = {
-                                        val updated = if (it) selectedAppPackages + app.packageName else selectedAppPackages - app.packageName
-                                        persistSelection(updated)
-                                    },
-                                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
-                                )
+                                    Text(
+                                        text = "REMOVE",
+                                        color = Color(0xFFFF5252),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable(enabled = !isCurrentlyLocked) {
+                                            persistSelection(selectedAppPackages - app.packageName)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -200,7 +208,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // -------------------------------------------------------------
-                    // TIMER CONTROL PANEL (DEFAULT CHOICES + MANUAL SLIDER)
+                    // TIMER PANEL (DEFAULT PRESETS + MANUAL SLIDER)
                     // -------------------------------------------------------------
                     if (isCurrentlyLocked) {
                         val minutesRemaining = TimeUnit.MILLISECONDS.toMinutes(lockEndTime - System.currentTimeMillis()).coerceAtLeast(1)
@@ -233,8 +241,8 @@ class MainActivity : ComponentActivity() {
                             val futureTimestamp = System.currentTimeMillis() + (durationInt * 60 * 1000)
                             val endClockTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(futureTimestamp))
 
-                            // 1. DEFAULT PRESET BUTTONS (15m, 30m, 1h, 2h)
-                            Text("DEFAULT CHOICES:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
+                            // 1. DEFAULT CHOICES
+                            Text("DEFAULT PRESETS:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -262,7 +270,7 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // 2. MANUAL SLIDER (5 mins to 480 mins = 8 hours)
+                            // 2. MANUAL DURATION SLIDER
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -311,6 +319,82 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+
+                // -------------------------------------------------------------
+                // ALL INSTALLED APPS DIALOG (WITH SEARCH & APP ICONS)
+                // -------------------------------------------------------------
+                if (showFullListDialog) {
+                    var query by remember { mutableStateOf("") }
+                    val filtered = remember(query, installedApps) {
+                        if (query.isBlank()) installedApps
+                        else installedApps.filter { it.name.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true) }
+                    }
+
+                    AlertDialog(
+                        onDismissRequest = { showFullListDialog = false },
+                        confirmButton = {
+                            Button(
+                                onClick = { showFullListDialog = false },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Text("DONE (${selectedAppPackages.size} SELECTED)", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        containerColor = Color(0xFF12151D),
+                        title = { Text("All Installed Apps", fontWeight = FontWeight.Bold, color = Color.White) },
+                        text = {
+                            Column(modifier = Modifier.fillMaxWidth().height(400.dp)) {
+                                OutlinedTextField(
+                                    value = query,
+                                    onValueChange = { query = it },
+                                    placeholder = { Text("Search installed apps...", fontSize = 12.sp, color = Color.Gray) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(filtered, key = { it.packageName }) { app ->
+                                        val isChecked = selectedAppPackages.contains(app.packageName)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isChecked) Color(0xFF16241C) else Color(0xFF181C26))
+                                                .clickable {
+                                                    val updated = if (isChecked) selectedAppPackages - app.packageName else selectedAppPackages + app.packageName
+                                                    persistSelection(updated)
+                                                }
+                                                .padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                if (app.icon != null) {
+                                                    Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(32.dp))
+                                                } else {
+                                                    Box(modifier = Modifier.size(32.dp).background(Color.Gray, CircleShape))
+                                                }
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(app.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                            }
+
+                                            Checkbox(
+                                                checked = isChecked,
+                                                onCheckedChange = {
+                                                    val updated = if (it) selectedAppPackages + app.packageName else selectedAppPackages - app.packageName
+                                                    persistSelection(updated)
+                                                },
+                                                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -320,16 +404,17 @@ class MainActivity : ComponentActivity() {
         val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
-        val resolveInfos = pm.queryIntentActivities(mainIntent, 0)
-        return resolveInfos
-            .map {
-                AppItem(
-                    name = it.loadLabel(pm).toString(),
-                    packageName = it.activityInfo.packageName
-                )
+        return pm.queryIntentActivities(mainIntent, 0).mapNotNull { resolveInfo ->
+            try {
+                val pkg = resolveInfo.activityInfo.packageName
+                if (pkg == context.packageName) return@mapNotNull null
+                val name = resolveInfo.loadLabel(pm).toString()
+                val iconDrawable: Drawable = resolveInfo.loadIcon(pm)
+                val bitmap: ImageBitmap = iconDrawable.toBitmap(width = 80, height = 80).asImageBitmap()
+                AppItem(name = name, packageName = pkg, icon = bitmap)
+            } catch (e: Exception) {
+                null
             }
-            .filter { it.packageName != context.packageName }
-            .distinctBy { it.packageName }
-            .sortedBy { it.name.lowercase() }
+        }.sortedBy { it.name.lowercase() }
     }
 }
