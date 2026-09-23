@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -51,7 +52,7 @@ class MainActivity : ComponentActivity() {
                 var selectedMinutes by remember { mutableFloatStateOf(30f) }
                 var searchQuery by remember { mutableStateOf("") }
 
-                // Load all installed apps with launch intent (ignores internal background daemons)
+                // Load all launchable installed apps on the phone
                 val installedApps by remember {
                     mutableStateOf(loadInstalledApps(context))
                 }
@@ -126,7 +127,7 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Search and App Filter Bar
+                    // Search Bar
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -141,7 +142,7 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Installed Apps List (Scrollable)
+                    // Scrollable Installed Apps
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
@@ -327,7 +328,7 @@ class MainActivity : ComponentActivity() {
                     packageName = it.activityInfo.packageName
                 )
             }
-            .filter { it.packageName != context.packageName } // exclude TitanBlock itself
+            .filter { it.packageName != context.packageName }
             .distinctBy { it.packageName }
             .sortedBy { it.name.lowercase() }
     }
