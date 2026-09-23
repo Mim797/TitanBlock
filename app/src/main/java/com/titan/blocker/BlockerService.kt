@@ -20,7 +20,7 @@ class BlockerService : AccessibilityService() {
             if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
             val currentPackage = event.packageName?.toString() ?: return
 
-            // CRITICAL: NEVER inspect or block TitanBlock itself
+            // Never inspect or block TitanBlock itself
             if (currentPackage == packageName) return
 
             val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE)
@@ -33,9 +33,10 @@ class BlockerService : AccessibilityService() {
             val tempPassUntil = prefs.getLong("temp_pass_time", 0L)
             if (System.currentTimeMillis() < tempPassUntil) return
 
-            // 2. ANTI-FORCE-STOP SHIELD: Guard Android Settings & App Installers
+            // 2. ANTI-FORCE-STOP SHIELD: Guard Android Settings ONLY
+            // (Allows package installer so you can install and update APKs freely)
             val protectSettings = prefs.getBoolean("protect_settings", true)
-            if (protectSettings && (currentPackage == "com.android.settings" || currentPackage.contains("packageinstaller"))) {
+            if (protectSettings && currentPackage == "com.android.settings") {
                 performGlobalAction(GLOBAL_ACTION_HOME)
                 handler.post {
                     Toast.makeText(applicationContext, "🛡️ Settings locked during Focus Session!", Toast.LENGTH_SHORT).show()
@@ -60,7 +61,6 @@ class BlockerService : AccessibilityService() {
                 startActivity(overlayIntent)
             }
         } catch (t: Throwable) {
-            // Failsafe: Never allow the accessibility service to crash the process
             t.printStackTrace()
         }
     }
