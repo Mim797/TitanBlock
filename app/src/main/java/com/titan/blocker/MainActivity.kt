@@ -195,7 +195,7 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxWidth()
                         ) {
                             items(pinnedList, key = { it }) { pkg ->
-                                val appName = resolveAppNameQuick(context, pkg)
+                                val appName: String = resolveAppNameQuick(context, pkg)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -382,11 +382,11 @@ class MainActivity : ComponentActivity() {
                                                     .fillMaxWidth()
                                                     .clip(RoundedCornerShape(8.dp))
                                                     .background(if (isChecked) Color(0xFF16241C) else Color(0xFF181C26))
-                                                    .clickable {
-                                                        val updated = if (isChecked) selectedAppPackages - app.packageName else selectedAppPackages + app.packageName
-                                                        persistSelection(updated)
-                                                    }
-                                                    .padding(8.dp),
+                                                .clickable {
+                                                    val updated = if (isChecked) selectedAppPackages - app.packageName else selectedAppPackages + app.packageName
+                                                    persistSelection(updated)
+                                                }
+                                                .padding(8.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
@@ -424,4 +424,76 @@ class MainActivity : ComponentActivity() {
 
         if (bitmap == null) {
             LaunchedEffect(packageName) {
-                wi
+                withContext(Dispatchers.IO) {
+                    try {
+                        val drawable = context.packageManager.getApplicationIcon(packageName)
+                        val decoded = drawableToTinyBitmap(drawable)?.asImageBitmap()
+                        if (decoded != null) {
+                            FastIconCache.put(packageName, decoded)
+                            bitmap = decoded
+                        }
+                    } catch (t: Throwable) {
+                        // ignore and use fallback letter
+                    }
+                }
+            }
+        }
+
+        if (bitmap != null) {
+            Image(bitmap = bitmap!!, contentDescription = null, modifier = Modifier.size(32.dp))
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(Color(0xFF232A3B), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(appName.take(1).uppercase(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
+    private fun resolveAppNameQuick(context: Context, pkg: String): String {
+        return try {
+            val pm = context.packageManager
+            val info = pm.getApplicationInfo(pkg, 0)
+            pm.getApplicationLabel(info).toString()
+        } catch (t: Throwable) {
+            pkg.substringAfterLast('.')
+        }
+    }
+
+    private fun scanLaunchableApps(context: Context): List<AppItem> {
+        val pm = context.packageManager
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val resolveInfos = pm.queryIntentActivities(mainIntent, 0)
+        return resolveInfos.mapNotNull { resolveInfo ->
+            try {
+                val pkg = resolveInfo.activityInfo.packageName
+                if (pkg == context.packageName) return@mapNotNull null
+                val name = resolveInfo.loadLabel(pm).toString()
+                AppItem(name = name, packageName = pkg)
+            } catch (t: Throwable) {
+                null
+            }
+        }.sortedBy { it.name.lowercase() }
+    }
+
+    private fun drawableToTinyBitmap(drawable: Drawable): Bitmap? {
+        return try {
+            if (drawable is BitmapDrawable && drawable.bitmap != null) {
+                Bitmap.createScaledBitmap(drawable.bitmap, 48, 48, false)
+            } else {
+                val bitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                drawable.setBounds(0, 0, 48, 48)
+                drawable.draw(canvas)
+                bitmap
+            }
+        } catch (t: Throwable) {
+            null
+        }
+    }
+}
