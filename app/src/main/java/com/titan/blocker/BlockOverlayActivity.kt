@@ -56,7 +56,7 @@ class BlockOverlayActivity : Activity() {
         }
         layout.addView(timerDisplay)
 
-        val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS)
         val remainingMillis = prefs.getLong("lock_end_time", 0L) - System.currentTimeMillis()
 
         if (remainingMillis <= 0) {
