@@ -17,7 +17,8 @@ class BlockerService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
 
     // Prevent repeated overlay launches while the same blocked app remains foreground.
-    private var activeBlockedPackage: String? = null
+    private var lastBlockedPackage: String? = null
+    private var lastBlockAttemptAt = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -44,13 +45,6 @@ class BlockerService : AccessibilityService() {
 
         val currentPackage = event.packageName?.toString() ?: return
 
-        // Any foreground package change ends the previous app's debounce window.
-        // In particular, returning to TitanBlock's overlay must allow the same
-        // blocked app to be intercepted again if the user reopens it.
-        if (currentPackage != activeBlockedPackage) {
-            activeBlockedPackage = null
-        }
-
         // Never inspect or block TitanBlock itself.
         if (currentPackage == packageName) return
 
@@ -61,7 +55,6 @@ class BlockerService : AccessibilityService() {
             val isLocked = now < lockEndTime
 
             if (!isLocked) {
-                activeBlockedPackage = null
                 return
             }
 
@@ -75,8 +68,9 @@ class BlockerService : AccessibilityService() {
             // Guard Android's main Settings app when the setting is enabled.
             val protectSettings = prefs.getBoolean("protect_settings", true)
             if (protectSettings && currentPackage == "com.android.settings") {
-                if (activeBlockedPackage != currentPackage) {
-                    activeBlockedPackage = currentPackage
+                if (lastBlockedPackage != currentPackage || now - lastBlockAttemptAt > 900L) {
+                    lastBlockedPackage = currentPackage
+                    lastBlockAttemptAt = now
                     performGlobalAction(GLOBAL_ACTION_HOME)
                     handler.post {
                         Toast.makeText(
@@ -103,8 +97,9 @@ class BlockerService : AccessibilityService() {
             }
 
             // Do not repeatedly launch the lock screen for every accessibility event.
-            if (activeBlockedPackage == currentPackage) return
-            activeBlockedPackage = currentPackage
+            if (lastBlockedPackage == currentPackage && now - lastBlockAttemptAt < 900L) return
+            lastBlockedPackage = currentPackage
+            lastBlockAttemptAt = now
 
             val launchOverlay = Runnable {
                 try {
