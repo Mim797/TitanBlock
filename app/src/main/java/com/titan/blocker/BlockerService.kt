@@ -22,6 +22,8 @@ class BlockerService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        // Keep the user-visible guardian alive independently of the launcher task.
+        KeepAliveService.start(applicationContext)
 
         // Apply the event configuration here as well as in XML. This helps keep
         // the service configuration consistent after Android reconnects it.
@@ -49,7 +51,7 @@ class BlockerService : AccessibilityService() {
         if (currentPackage == packageName) return
 
         try {
-            val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE)
+            val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS)
             val now = System.currentTimeMillis()
             val lockEndTime = prefs.getLong("lock_end_time", 0L)
             val isLocked = now < lockEndTime
