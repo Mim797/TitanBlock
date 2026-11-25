@@ -46,6 +46,9 @@ object DeviceOwnerProtection {
             return try {
                 if (targets.isNotEmpty()) dpm.setPackagesSuspended(admin, targets, false)
                 cancelExpiry(context)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    dpm.setUserControlDisabledPackages(admin, emptyList())
+                }
                 dpm.clearDeviceOwnerApp(context.packageName)
                 !dpm.isDeviceOwnerApp(context.packageName)
             } catch (_: Throwable) {
@@ -86,6 +89,10 @@ object DeviceOwnerProtection {
         val admin = ComponentName(context, TitanDeviceAdminReceiver::class.java)
 
         return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Prevent the user from force-stopping or clearing TitanBlock in Settings.
+                dpm.setUserControlDisabledPackages(admin, listOf(context.packageName))
+            }
             if (endTime > System.currentTimeMillis() && targets.isNotEmpty()) {
                 val failed = dpm.setPackagesSuspended(admin, targets, true).toList()
                 scheduleExpiry(context, endTime)
