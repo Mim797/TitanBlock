@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 var lockEndTime by remember { mutableStateOf(prefs.getLong("lock_end_time", 0L)) }
                 var selectedMinutes by remember { mutableFloatStateOf(30f) }
                 var showFullListDialog by remember { mutableStateOf(false) }
+                var showOwnerRemovalDialog by remember { mutableStateOf(false) }
 
                 // LIVE TICKER: Updates every second
                 var currentClockTime by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -134,6 +135,14 @@ class MainActivity : ComponentActivity() {
                                 fontSize = 9.sp,
                                 color = if (DeviceOwnerProtection.isDeviceOwner(context)) Color(0xFF00E676) else Color(0xFFFFB74D)
                             )
+                            if (DeviceOwnerProtection.isDeviceOwner(context)) {
+                                Text(
+                                    "REMOVE DEVICE OWNER",
+                                    fontSize = 9.sp,
+                                    color = Color(0xFFFF5252),
+                                    modifier = Modifier.clickable { showOwnerRemovalDialog = true }
+                                )
+                            }
                         }
                         Button(
                             onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
@@ -465,6 +474,38 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    )
+                }
+
+                if (showOwnerRemovalDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showOwnerRemovalDialog = false },
+                        title = { Text("Remove system-level protection?") },
+                        text = {
+                            Text("This will remove TitanBlock Device Owner privileges and restore access to selected apps. Your normal Accessibility blocking mode will remain available.")
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    val removed = DeviceOwnerProtection.removeOwner(context)
+                                    showOwnerRemovalDialog = false
+                                    Toast.makeText(
+                                        context,
+                                        if (removed) "Device Owner removed." else "Could not remove Device Owner.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                            ) { Text("REMOVE", color = Color.White) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showOwnerRemovalDialog = false }) {
+                                Text("CANCEL")
+                            }
+                        },
+                        containerColor = Color(0xFF12151D),
+                        titleContentColor = Color.White,
+                        textContentColor = Color.LightGray
                     )
                 }
             }
