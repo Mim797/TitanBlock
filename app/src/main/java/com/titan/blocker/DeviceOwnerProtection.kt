@@ -25,6 +25,36 @@ object DeviceOwnerProtection {
         return dpm.isDeviceOwnerApp(context.packageName)
     }
 
+    @Suppress("DEPRECATION")
+    fun removeOwner(context: Context): Boolean {
+        if (!isDeviceOwner(context)) return true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val prefs = context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS
+            )
+            val json = prefs.getString(KEY_BLOCKED_APPS, "[]") ?: "[]"
+            val type = object : TypeToken<List<String>>() {}.type
+            val packages: List<String> = try {
+                Gson().fromJson<List<String>>(json, type) ?: emptyList()
+            } catch (_: Throwable) {
+                emptyList()
+            }
+            val targets = packages.filter { it.isNotBlank() && it != context.packageName }.distinct().toTypedArray()
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(context, TitanDeviceAdminReceiver::class.java)
+            return try {
+                if (targets.isNotEmpty()) dpm.setPackagesSuspended(admin, targets, false)
+                cancelExpiry(context)
+                dpm.clearDeviceOwnerApp(context.packageName)
+                !dpm.isDeviceOwnerApp(context.packageName)
+            } catch (_: Throwable) {
+                false
+            }
+        }
+        return false
+    }
+
     /**
      * Returns packages that Android refused to suspend, null if Device Owner
      * mode is not enabled or the API is unavailable.
