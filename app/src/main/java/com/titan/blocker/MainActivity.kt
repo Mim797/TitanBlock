@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         KeepAliveService.start(this)
         val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS)
+        DeviceOwnerProtection.refresh(this)
         val gson = Gson()
 
         setContent {
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 var lockEndTime by remember { mutableStateOf(prefs.getLong("lock_end_time", 0L)) }
                 var selectedMinutes by remember { mutableFloatStateOf(30f) }
                 var showFullListDialog by remember { mutableStateOf(false) }
+                var showOwnerRemovalDialog by remember { mutableStateOf(false) }
 
                 // LIVE TICKER: Updates every second
                 var currentClockTime by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -109,6 +111,7 @@ class MainActivity : ComponentActivity() {
                 fun persistSelection(updated: Set<String>) {
                     selectedAppPackages = updated
                     prefs.edit().putString("blocked_apps", gson.toJson(updated)).apply()
+                    DeviceOwnerProtection.refresh(context)
                 }
 
                 Column(
@@ -126,6 +129,20 @@ class MainActivity : ComponentActivity() {
                         Column {
                             Text("TITAN BLOCKER", fontWeight = FontWeight.Black, fontSize = 22.sp, color = Color.White)
                             Text("${selectedAppPackages.size} apps targeted for lock", fontSize = 11.sp, color = Color.Gray)
+                            Text(
+                                if (DeviceOwnerProtection.isDeviceOwner(context)) "SYSTEM-LEVEL PROTECTION ENABLED"
+                                else "ADVANCED MODE: ADB DEVICE OWNER NOT ENABLED",
+                                fontSize = 9.sp,
+                                color = if (DeviceOwnerProtection.isDeviceOwner(context)) Color(0xFF00E676) else Color(0xFFFFB74D)
+                            )
+                            if (DeviceOwnerProtection.isDeviceOwner(context)) {
+                                Text(
+                                    "REMOVE DEVICE OWNER",
+                                    fontSize = 9.sp,
+                                    color = Color(0xFFFF5252),
+                                    modifier = Modifier.clickable { showOwnerRemovalDialog = true }
+                                )
+                            }
                         }
                         Button(
                             onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
@@ -343,6 +360,10 @@ class MainActivity : ComponentActivity() {
                                         val end = System.currentTimeMillis() + (durationInt * 60 * 1000)
                                         prefs.edit().putLong("lock_end_time", end).apply()
                                         lockEndTime = end
+                                        val failed = DeviceOwnerProtection.refresh(context)
+                                        if (failed != null && failed.isNotEmpty()) {
+                                            Toast.makeText(context, "Some apps could not be suspended: ${failed.joinToString()}", Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 },
                                 enabled = selectedAppPackages.isNotEmpty(),
@@ -453,6 +474,38 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    )
+                }
+
+                if (showOwnerRemovalDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showOwnerRemovalDialog = false },
+                        title = { Text("Remove system-level protection?") },
+                        text = {
+                            Text("This will remove TitanBlock Device Owner privileges and restore access to selected apps. Your normal Accessibility blocking mode will remain available.")
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    val removed = DeviceOwnerProtection.removeOwner(context)
+                                    showOwnerRemovalDialog = false
+                                    Toast.makeText(
+                                        context,
+                                        if (removed) "Device Owner removed." else "Could not remove Device Owner.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                            ) { Text("REMOVE", color = Color.White) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showOwnerRemovalDialog = false }) {
+                                Text("CANCEL")
+                            }
+                        },
+                        containerColor = Color(0xFF12151D),
+                        titleContentColor = Color.White,
+                        textContentColor = Color.LightGray
                     )
                 }
             }
