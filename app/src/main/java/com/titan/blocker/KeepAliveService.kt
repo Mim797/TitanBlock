@@ -11,9 +11,11 @@ import android.os.Build
 import android.os.IBinder
 
 /**
- * A small, user-visible foreground service that helps Xiaomi/MIUI keep the
- * app process alive when its launcher task is dismissed from Recents.
- * It does not replace the AccessibilityService and cannot override Force stop.
+ * Runs in its own process so removing the launcher task does not take down
+ * the accessibility service process with the activity process.
+ *
+ * This is a resilience measure, not a way to defeat Android Force stop,
+ * disabled Accessibility access, or Xiaomi's explicit app-kill controls.
  */
 class KeepAliveService : Service() {
 
@@ -24,8 +26,13 @@ class KeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Ask Android to recreate this service if the process is reclaimed.
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // The service is intentionally independent of the launcher task.
+        // Do not stop it when TitanBlock is swiped away from Recents.
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -52,25 +59,21 @@ class KeepAliveService : Service() {
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentTitle("TitanBlock protection active")
-                .setContentText("Focus protection is running.")
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .setCategory(Notification.CATEGORY_SERVICE)
-                .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentTitle("TitanBlock protection active")
-                .setContentText("Focus protection is running.")
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build()
         }
+
+        return builder
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle("TitanBlock protection active")
+            .setContentText("Focus protection is running.")
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .build()
     }
 
     companion object {
@@ -86,7 +89,7 @@ class KeepAliveService : Service() {
                     context.startService(intent)
                 }
             } catch (_: Exception) {
-                // The UI and AccessibilityService can still operate if startup is restricted.
+                // The AccessibilityService remains the actual blocking engine.
             }
         }
     }
