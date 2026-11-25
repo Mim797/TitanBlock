@@ -44,6 +44,13 @@ class BlockerService : AccessibilityService() {
 
         val currentPackage = event.packageName?.toString() ?: return
 
+        // Any foreground package change ends the previous app's debounce window.
+        // In particular, returning to TitanBlock's overlay must allow the same
+        // blocked app to be intercepted again if the user reopens it.
+        if (currentPackage != activeBlockedPackage) {
+            activeBlockedPackage = null
+        }
+
         // Never inspect or block TitanBlock itself.
         if (currentPackage == packageName) return
 
