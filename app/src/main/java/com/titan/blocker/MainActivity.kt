@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         KeepAliveService.start(this)
         val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS)
+        DeviceOwnerProtection.refresh(this)
         val gson = Gson()
 
         setContent {
@@ -109,6 +110,7 @@ class MainActivity : ComponentActivity() {
                 fun persistSelection(updated: Set<String>) {
                     selectedAppPackages = updated
                     prefs.edit().putString("blocked_apps", gson.toJson(updated)).apply()
+                    DeviceOwnerProtection.refresh(context)
                 }
 
                 Column(
@@ -343,6 +345,10 @@ class MainActivity : ComponentActivity() {
                                         val end = System.currentTimeMillis() + (durationInt * 60 * 1000)
                                         prefs.edit().putLong("lock_end_time", end).apply()
                                         lockEndTime = end
+                                        val failed = DeviceOwnerProtection.refresh(context)
+                                        if (failed != null && failed.isNotEmpty()) {
+                                            Toast.makeText(context, "Some apps could not be suspended: ${failed.joinToString()}", Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 },
                                 enabled = selectedAppPackages.isNotEmpty(),
