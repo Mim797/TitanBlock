@@ -61,7 +61,6 @@ class BlockerService : AccessibilityService() {
             // Temporary emergency pass.
             val tempPassUntil = prefs.getLong("temp_pass_time", 0L)
             if (now < tempPassUntil) {
-                activeBlockedPackage = null
                 return
             }
 
@@ -92,7 +91,6 @@ class BlockerService : AccessibilityService() {
             }
 
             if (!blockedApps.contains(currentPackage)) {
-                activeBlockedPackage = null
                 return
             }
 
