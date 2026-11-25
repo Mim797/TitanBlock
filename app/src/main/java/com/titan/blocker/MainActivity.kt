@@ -128,6 +128,12 @@ class MainActivity : ComponentActivity() {
                         Column {
                             Text("TITAN BLOCKER", fontWeight = FontWeight.Black, fontSize = 22.sp, color = Color.White)
                             Text("${selectedAppPackages.size} apps targeted for lock", fontSize = 11.sp, color = Color.Gray)
+                            Text(
+                                if (DeviceOwnerProtection.isDeviceOwner(context)) "SYSTEM-LEVEL PROTECTION ENABLED"
+                                else "ADVANCED MODE: ADB DEVICE OWNER NOT ENABLED",
+                                fontSize = 9.sp,
+                                color = if (DeviceOwnerProtection.isDeviceOwner(context)) Color(0xFF00E676) else Color(0xFFFFB74D)
+                            )
                         }
                         Button(
                             onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
