@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        KeepAliveService.start(this)
         val prefs = getSharedPreferences("titan_prefs", Context.MODE_PRIVATE)
         val gson = Gson()
 
