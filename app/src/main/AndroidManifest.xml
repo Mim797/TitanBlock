@@ -35,6 +35,8 @@
 
         <service
             android:name=".KeepAliveService"
+            android:process=":keepalive"
+            android:stopWithTask="false"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
@@ -53,6 +55,8 @@
 
         <service
             android:name=".BlockerService"
+            android:process=":accessibility"
+            android:stopWithTask="false"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
